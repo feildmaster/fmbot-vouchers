@@ -41,9 +41,7 @@ const state = {
   refreshing: undefined,
 };
 
-const menu = () => (state.live
-  ? buildMenu(state.live, state.pointers)
-  : { plans: state.configured, missing: [] });
+const menu = () => buildMenu(state.live, state.pointers, state.configured);
 
 const currentPlans = () => menu().plans;
 

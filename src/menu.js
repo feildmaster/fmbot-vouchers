@@ -1,6 +1,8 @@
-module.exports = function buildMenu(live, pointers) {
+module.exports = function buildMenu(live, pointers, local = {}) {
+  if (!live) return { plans: local, missing: [] };
+
   const names = Object.keys(pointers);
-  if (!names.length) return { plans: live, missing: [] };
+  if (!names.length) return { plans: { ...live, ...local }, missing: [] };
 
   const plans = {};
   const missing = [];
@@ -12,5 +14,5 @@ module.exports = function buildMenu(live, pointers) {
     }
     plans[name] = { ...live[plan], label: label || live[plan].label };
   });
-  return { plans, missing };
+  return { plans: { ...plans, ...local }, missing };
 };

@@ -66,6 +66,60 @@ test('two names can point at the same live plan', () => {
   assert.deepEqual(Object.keys(plans), ['a', 'b']);
 });
 
+const LOCAL = {
+  badge: {
+    price: 5, type: 'badge', data: { id: 'early' }, label: 'Early badge',
+  },
+};
+
+test('plans of our own are offered next to every live plan', () => {
+  const { plans, missing } = buildMenu(LIVE, {}, LOCAL);
+
+  assert.deepEqual(Object.keys(plans), ['month', 'slot', 'badge']);
+  assert.deepEqual(plans.badge, LOCAL.badge);
+  assert.deepEqual(missing, []);
+});
+
+test('plans of our own are offered next to the pointed-at plans, which still limit the live ones', () => {
+  const { plans } = buildMenu(LIVE, { pro: { plan: 'month', label: 'Pro' } }, LOCAL);
+
+  assert.deepEqual(Object.keys(plans), ['pro', 'badge']);
+});
+
+test('a plan of our own replaces a live plan with the same name', () => {
+  const own = {
+    month: {
+      price: 5, type: 'badge', data: {}, label: 'Mine',
+    },
+  };
+
+  const { plans } = buildMenu(LIVE, {}, own);
+
+  assert.deepEqual(plans.month, own.month);
+  assert.deepEqual(Object.keys(plans), ['month', 'slot']);
+});
+
+test('before the live plans have loaded, only the plans of our own are offered', () => {
+  const { plans, missing } = buildMenu(undefined, { pro: { plan: 'month', label: 'Pro' } }, LOCAL);
+
+  assert.deepEqual(plans, LOCAL);
+  assert.deepEqual(missing, []);
+});
+
+test('a pointer that points nowhere is still reported when there are plans of our own', () => {
+  const { plans, missing } = buildMenu(LIVE, { gone: { plan: 'year', label: 'Year' } }, LOCAL);
+
+  assert.deepEqual(Object.keys(plans), ['badge']);
+  assert.deepEqual(missing, ['gone']);
+});
+
+test('the live plans and the plans of our own are not changed', () => {
+  buildMenu(LIVE, {}, LOCAL);
+
+  assert.deepEqual(Object.keys(LIVE), ['month', 'slot']);
+  assert.deepEqual(Object.keys(LOCAL), ['badge']);
+});
+
 test('the live plans are not changed', () => {
   buildMenu(LIVE, { pro: { plan: 'month', label: 'Pro' } });
 
