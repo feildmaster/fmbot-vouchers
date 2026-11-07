@@ -1,4 +1,8 @@
-const { confirmation: confirmationEmbed, purchase: purchaseEmbed } = require('./embed');
+const {
+  confirmation: confirmationEmbed,
+  processing: processingEmbed,
+  purchase: purchaseEmbed,
+} = require('./embed');
 const { fmt } = require('./format');
 
 const PROVIDER = 'discord.com';
@@ -335,10 +339,14 @@ module.exports = function createService({
     return { purchase };
   }
 
-  async function confirm(ctx, id) {
-    await freshen();
+  async function confirm(ctx, id, progress) {
     const { purchase, reply } = await openOffer(ctx, id);
     if (reply) return reply;
+
+    await Promise.resolve(progress(update(`Processing your ${purchase.label} purchase…`, {
+      embed: processingEmbed({ label: purchase.label, price: purchase.amount }),
+    }))).catch(onError);
+    await freshen();
 
     const entry = Object.hasOwn(plans(), purchase.plan) ? plans()[purchase.plan] : undefined;
     if (!entry || priceOf(entry) !== purchase.amount) {
@@ -378,10 +386,10 @@ module.exports = function createService({
     return update('Cancelled. Nothing was taken.');
   }
 
-  async function component(ctx, componentId) {
+  async function component(ctx, componentId, { progress = async () => {} } = {}) {
     const match = BUTTON.exec(String(componentId));
     if (!match) return hiddenReply('That button is not available any more.');
-    return match[1] === 'confirm' ? confirm(ctx, match[2]) : cancel(ctx, match[2]);
+    return match[1] === 'confirm' ? confirm(ctx, match[2], progress) : cancel(ctx, match[2]);
   }
 
   const handlers = {

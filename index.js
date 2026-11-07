@@ -159,7 +159,9 @@ const contextOf = msg => ({ discordId: msg.uid, name: msg.data.nick || msg.uid }
 
 plugin.onComponent((msg) => {
   if (msg.data.connectorType !== 'discord') return;
-  service.component(contextOf(msg), msg.data.componentId)
+  service.component(contextOf(msg), msg.data.componentId, {
+    progress: reply => answer(msg, reply),
+  })
     .then(reply => answer(msg, reply))
     .catch(report);
 });

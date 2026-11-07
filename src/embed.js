@@ -42,4 +42,14 @@ function confirmation({
   };
 }
 
-module.exports = { confirmation, purchase };
+function processing({ label, price }) {
+  return {
+    title: 'Processing your purchase',
+    color: OFFER_COLOR,
+    description: `**${label}**`,
+    fields: [{ name: 'Price', value: `${fmt(price)} FMC`, inline: true }],
+    footer: { text: 'This takes a few seconds, and this message updates when it is done' },
+  };
+}
+
+module.exports = { confirmation, processing, purchase };

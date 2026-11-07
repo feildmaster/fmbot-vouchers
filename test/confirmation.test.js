@@ -349,6 +349,141 @@ test('an offer that has only just ended is kept for a while, so its button can s
   assert.match(reply.text, /offer ended/);
 });
 
+const withProgress = (log = []) => ({
+  progress: async (reply) => { log.push(['progress', reply]); },
+  log,
+});
+
+test('Confirm says it is processing before anything slow starts, and takes the buttons off at once', async () => {
+  const events = [];
+  replies.reserve = async () => { events.push('reserve'); return { code: 'AAAA-BBBB-CCCC' }; };
+  replies.charge = async () => { events.push('charge'); return { status: 'completed' }; };
+  replies.activate = async () => { events.push('activate'); return { code: 'AAAA-BBBB-CCCC' }; };
+  service = build({ refresh: async () => { events.push('refresh'); } });
+  const prompt = await offer();
+  events.length = 0;
+
+  await service.component(ALAN, confirmOf(prompt), {
+    progress: async () => { events.push('progress'); },
+  });
+
+  assert.deepEqual(events, ['progress', 'refresh', 'reserve', 'charge', 'activate']);
+});
+
+test('the progress message replaces the offer, with the plan and the price and no buttons', async () => {
+  const { progress, log } = withProgress();
+  const prompt = await offer();
+
+  await service.component(ALAN, confirmOf(prompt), { progress });
+
+  assert.equal(log.length, 1);
+  const reply = log[0][1];
+  assert.equal(reply.update, true);
+  assert.equal(reply.hidden, true);
+  assert.equal(reply.components, undefined);
+  assert.equal(reply.embed.title, 'Processing your purchase');
+  assert.equal(reply.embed.description, '**Monthly**');
+  assert.equal(reply.embed.fields[0].value, '100 FMC');
+  assert.match(reply.text, /Processing your Monthly purchase/);
+});
+
+test('the result still comes back as its own reply after the progress message', async () => {
+  const { progress } = withProgress();
+  const prompt = await offer();
+
+  const reply = await service.component(ALAN, confirmOf(prompt), { progress });
+
+  assert.equal(reply.embed.title, 'Voucher purchased');
+  assert.equal(reply.update, true);
+});
+
+test('nothing starts until the progress message has gone out', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const prompt = await offer();
+
+  const pending = service.component(ALAN, confirmOf(prompt), { progress: () => gate });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(names(), []);
+  release();
+  await pending;
+
+  assert.deepEqual(names(), ['reserve', 'charge', 'activate']);
+});
+
+test('a progress message that cannot be sent is reported and does not stop the purchase', async () => {
+  const prompt = await offer();
+
+  const reply = await service.component(ALAN, confirmOf(prompt), {
+    progress: async () => { throw new Error('could not send'); },
+  });
+
+  assert.equal(reply.embed.title, 'Voucher purchased');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /could not send/);
+});
+
+test('a press that is refused sends no progress message, only the refusal', async () => {
+  const prompt = await offer();
+  const { progress, log } = withProgress();
+  clock = START + minutes(10) + 1;
+
+  const late = await service.component(ALAN, confirmOf(prompt), { progress });
+  const stranger = await service.component(SAM, confirmOf(prompt), { progress });
+  const nothing = await service.component(ALAN, 'confirm:missing', { progress });
+
+  assert.match(late.text, /offer ended/);
+  assert.equal(stranger.text, "That isn't your purchase.");
+  assert.equal(nothing.text, "That isn't your purchase.");
+  assert.equal(log.length, 0);
+});
+
+test('pressing Confirm again after it was pressed sends no second progress message', async () => {
+  const prompt = await offer();
+  const { progress, log } = withProgress();
+
+  await service.component(ALAN, confirmOf(prompt), { progress });
+  const again = await service.component(ALAN, confirmOf(prompt), { progress });
+
+  assert.equal(log.length, 1);
+  assert.match(again.text, /already confirmed/);
+});
+
+test('if the price changed after the offer, the progress message is replaced by the refusal', async () => {
+  const prompt = await offer();
+  plans = { monthly: monthly({ price: 80, regular: 100, until: START + minutes(30) }) };
+  const { progress, log } = withProgress();
+
+  const reply = await service.component(ALAN, confirmOf(prompt), { progress });
+
+  assert.equal(log.length, 1);
+  assert.match(reply.text, /price changed to 80 FMC/);
+  assert.equal(reply.update, true);
+  assert.deepEqual(names(), []);
+});
+
+test('Cancel is quick and sends no progress message', async () => {
+  const prompt = await offer();
+  const { progress, log } = withProgress();
+
+  const reply = await service.component(ALAN, cancelOf(prompt), { progress });
+
+  assert.equal(reply.text, 'Cancelled. Nothing was taken.');
+  assert.equal(log.length, 0);
+});
+
+test('a refused charge is a reply after the progress message, not instead of it', async () => {
+  replies.charge = async () => ({ error: 'Balance insufficient' });
+  const prompt = await offer();
+  const { progress, log } = withProgress();
+
+  const reply = await service.component(ALAN, confirmOf(prompt), { progress });
+
+  assert.equal(log.length, 1);
+  assert.equal(reply.text, "You don't have enough FMC for that plan.");
+  assert.equal(reply.update, true);
+});
+
 test('claiming a purchase works once, and only from the state it is in', async () => {
   const made = await store.createPurchase({
     discordId: '1', name: 'A', plan: 'p', label: 'P', type: 't', data: {}, amount: 5, memo: 'm', note: 'n', status: 'awaiting', expiresAt: 1,
