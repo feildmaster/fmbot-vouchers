@@ -23,12 +23,12 @@ const fakeFetch = (payload, status = 200) => {
 
 test('it posts the charge, signed with the key, to the charge endpoint', async () => {
   const { fetch, calls } = fakeFetch({ id: 'tx1', status: 'completed' });
-  const charge = createCharge({ key: 'secret', baseUrl: 'https://wallet.test', fetch });
+  const charge = createCharge({ key: 'secret', url: 'https://wallet.test/charge', fetch });
 
   assert.deepEqual(await charge(request), { id: 'tx1', status: 'completed' });
 
   const [{ url, options }] = calls;
-  assert.equal(url, 'https://wallet.test/wallet-charge');
+  assert.equal(url, 'https://wallet.test/charge');
   assert.deepEqual(JSON.parse(options.body), { ...request, currency: 'FMC' });
   assert.equal(
     options.headers.http_x_signature,

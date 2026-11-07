@@ -26,14 +26,14 @@ const activate = createReserve.createActivate(vouchers);
 const status = createReserve.createStatus({ ...vouchers, timeout: STATUS_TIMEOUT });
 const charge = createCharge({
   key: process.env.WALLET_VOUCHERS_KEY,
-  baseUrl: process.env.WALLET_URL || undefined,
+  url: process.env.WALLET_CHARGE_URL || undefined,
 });
 
 const warm = createWarm({
   urls: [
     (vouchers.url || createReserve.defaultUrl)('clientCreate'),
     (vouchers.url || createReserve.defaultUrl)('clientActivate'),
-    `${process.env.WALLET_URL || createCharge.DEFAULT_URL}/wallet-charge`,
+    process.env.WALLET_CHARGE_URL || createCharge.DEFAULT_URL,
   ],
 });
 

@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const DEFAULT_URL = 'https://us-central1-feildbase.cloudfunctions.net';
+const DEFAULT_URL = 'https://us-central1-feildbase.cloudfunctions.net/wallet-charge';
 const TIMEOUT = 10000;
 
 module.exports = createCharge;
@@ -8,7 +8,7 @@ module.exports.DEFAULT_URL = DEFAULT_URL;
 
 function createCharge({
   key,
-  baseUrl = DEFAULT_URL,
+  url = DEFAULT_URL,
   fetch: request = fetch,
   timeout = TIMEOUT,
 }) {
@@ -21,7 +21,7 @@ function createCharge({
       uid, amount, currency: 'FMC', memo, requestId, extra,
     });
     const signature = crypto.createHmac('sha256', key).update(body).digest('hex');
-    const response = await request(`${baseUrl}/wallet-charge`, {
+    const response = await request(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', http_x_signature: signature },
       body,
