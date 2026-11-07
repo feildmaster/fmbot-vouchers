@@ -3,7 +3,10 @@ const crypto = require('crypto');
 const DEFAULT_URL = 'https://us-central1-feildbase.cloudfunctions.net';
 const TIMEOUT = 10000;
 
-module.exports = function createCharge({
+module.exports = createCharge;
+module.exports.DEFAULT_URL = DEFAULT_URL;
+
+function createCharge({
   key,
   baseUrl = DEFAULT_URL,
   fetch: request = fetch,
@@ -27,4 +30,4 @@ module.exports = function createCharge({
     if (response.status >= 500) throw new Error(`The wallet answered ${response.status}`);
     return response.json();
   };
-};
+}

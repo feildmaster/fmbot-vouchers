@@ -35,4 +35,6 @@ const createReserve = createCall('clientCreate', ({
 createReserve.createActivate = createCall('clientActivate', ({ requestId }) => ({ requestId }));
 createReserve.createStatus = createCall('clientStatus', ({ codes }) => ({ codes }));
 
+createReserve.defaultUrl = defaultUrl;
+
 module.exports = createReserve;

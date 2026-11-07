@@ -537,3 +537,75 @@ test('a private reply says nothing about buttons or replacing when it has none',
 
   assert.deepEqual(reply.data, { interactionId: 'i1' });
 });
+
+const warmed = () => {
+  const counter = { count: 0 };
+  const warm = async () => { counter.count += 1; };
+  return { counter, warm };
+};
+
+test('the first offer after a quiet spell warms the services', async () => {
+  const { counter, warm } = warmed();
+  service = build({ warm });
+
+  await offer();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(counter.count, 1);
+});
+
+test('offers close together warm once', async () => {
+  const { counter, warm } = warmed();
+  service = build({ warm });
+
+  await offer();
+  clock = START + minutes(9);
+  await offer();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(counter.count, 1);
+});
+
+test('an offer after ten quiet minutes warms again', async () => {
+  const { counter, warm } = warmed();
+  service = build({ warm });
+
+  await offer();
+  clock = START + minutes(10) + 1;
+  await offer();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(counter.count, 2);
+});
+
+test('pressing Confirm counts as activity, so a later offer does not warm', async () => {
+  const { counter, warm } = warmed();
+  service = build({ warm });
+
+  const prompt = await offer();
+  clock = START + minutes(9);
+  await service.component(ALAN, confirmOf(prompt));
+  clock = START + minutes(18);
+  await offer();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(counter.count, 1);
+});
+
+test('a warm-up that fails is reported, and the offer still appears', async () => {
+  service = build({ warm: async () => { throw new Error('down'); } });
+
+  const prompt = await offer();
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(prompt.embed.title, 'Confirm your purchase');
+  assert.deepEqual(errors.map(error => error.message), ['down']);
+});
+
+test('the offer does not wait for a warm-up that is slow', async () => {
+  service = build({ warm: () => new Promise(() => {}) });
+
+  const prompt = await offer();
+
+  assert.equal(prompt.embed.title, 'Confirm your purchase');
+});

@@ -10,6 +10,7 @@ const PAGE_SIZE = 10;
 const MAX_NOTE = 200;
 const COLOR = 0x5865f2;
 const OFFER_TTL = 10 * 60 * 1000;
+const WARM_AFTER = 10 * 60 * 1000;
 const SWEEP_AFTER = 60 * 60 * 1000;
 const RETRY_TEXT = "I couldn't finish your purchase yet. It will be retried on its own, so check voucher-mine in a few minutes before buying again.";
 const EXPIRED_TEXT = 'That offer ended, so nothing was bought. Use voucher buy for a new one.';
@@ -90,11 +91,13 @@ module.exports = function createService({
   status = async () => ({ vouchers: {} }),
   isAdmin = () => false,
   refresh = async () => {},
+  warm = async () => {},
   now = Date.now,
   onError = console.error,
 }) {
   const settling = new Set();
   let lastStatusProblem;
+  const activity = { at: undefined };
 
   const onSale = plan => plan.until !== undefined && now() < plan.until;
   const priceOf = plan => (plan.until !== undefined && !onSale(plan) ? plan.regular : plan.price);
@@ -166,6 +169,12 @@ module.exports = function createService({
     if (!onSale(plan)) return line;
     return `${line} (sale ends <t:${Math.floor(plan.until / 1000)}:R>, normally ${fmt(plan.regular)})`;
   };
+
+  function touch() {
+    const idle = activity.at === undefined || now() - activity.at > WARM_AFTER;
+    activity.at = now();
+    return idle;
+  }
 
   const freshen = () => Promise.resolve().then(refresh).catch(onError);
 
@@ -321,6 +330,7 @@ module.exports = function createService({
       status: 'awaiting',
       expiresAt: now() + OFFER_TTL,
     });
+    if (touch()) Promise.resolve().then(warm).catch(onError);
     return offer(purchase, entry);
   }
 
@@ -342,6 +352,7 @@ module.exports = function createService({
   async function confirm(ctx, id, progress) {
     const { purchase, reply } = await openOffer(ctx, id);
     if (reply) return reply;
+    touch();
 
     await Promise.resolve(progress(update(`Processing your ${purchase.label} purchase…`, {
       embed: processingEmbed({ label: purchase.label, price: purchase.amount }),

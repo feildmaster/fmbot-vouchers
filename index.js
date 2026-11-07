@@ -9,6 +9,7 @@ const createFetchPlans = require('./src/remotePlans');
 const createStore = require('./src/store');
 const createReserve = require('./src/vouchers');
 const createCharge = require('./src/wallet');
+const createWarm = require('./src/warm');
 
 const RESUME_EVERY = 5 * 60 * 1000;
 const PLANS_EVERY = 5 * 60 * 1000;
@@ -26,6 +27,14 @@ const status = createReserve.createStatus({ ...vouchers, timeout: STATUS_TIMEOUT
 const charge = createCharge({
   key: process.env.WALLET_VOUCHERS_KEY,
   baseUrl: process.env.WALLET_URL || undefined,
+});
+
+const warm = createWarm({
+  urls: [
+    (vouchers.url || createReserve.defaultUrl)('clientCreate'),
+    (vouchers.url || createReserve.defaultUrl)('clientActivate'),
+    `${process.env.WALLET_URL || createCharge.DEFAULT_URL}/wallet-charge`,
+  ],
 });
 
 const plugin = new utils.Plugin({ dir: __dirname });
@@ -128,6 +137,7 @@ const service = createService({
   isAdmin: discordId => typeof discordId === 'string' && state.admins.has(discordId),
   plans: currentPlans,
   refresh: refreshNow,
+  warm,
   redeemURL: process.env.VOUCHER_REDEEM_URL,
   linkURL: process.env.WALLET_LINK_URL,
   onError: report,
