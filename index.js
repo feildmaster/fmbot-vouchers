@@ -1,7 +1,7 @@
 const utils = require('@basedakp48/plugin-utils');
 const admin = require('firebase-admin');
 const { buildDefinitions, definitions } = require('./src/commands');
-const { parseConfig } = require('./src/config');
+const { ADMINS_TEMPLATE, needsAdmins, parseConfig } = require('./src/config');
 const buildMenu = require('./src/menu');
 const privateReply = require('./src/reply');
 const createService = require('./src/service');
@@ -101,6 +101,7 @@ function refreshNow() {
 }
 
 plugin.on('config', (config) => {
+  if (needsAdmins(config)) plugin.config.child('admins').set(ADMINS_TEMPLATE).catch(report);
   const parsed = parseConfig(config);
   state.configured = parsed.plans;
   state.pointers = parsed.pointers;

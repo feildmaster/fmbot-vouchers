@@ -15,13 +15,17 @@ const asList = (value) => {
   return [];
 };
 
+const ADMINS_TEMPLATE = ['<placeholder>'];
+
+const needsAdmins = config => !isObject(config) || config.admins === undefined;
+
 function parseAdmins(value) {
   const admins = new Set();
   const rejectedAdmins = [];
   asList(value).forEach((entry) => {
     const id = typeof entry === 'string' ? entry.trim() : undefined;
     if (id && SNOWFLAKE.test(id)) admins.add(id);
-    else rejectedAdmins.push(entry);
+    else if (!ADMINS_TEMPLATE.includes(id)) rejectedAdmins.push(entry);
   });
   return { admins, rejectedAdmins };
 }
@@ -78,4 +82,4 @@ function parseConfig(config) {
   };
 }
 
-module.exports = { parseConfig };
+module.exports = { ADMINS_TEMPLATE, needsAdmins, parseConfig };

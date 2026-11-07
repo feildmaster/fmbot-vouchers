@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { parseConfig } = require('../src/config');
+const { ADMINS_TEMPLATE, needsAdmins, parseConfig } = require('../src/config');
 
 test('a plan has a whole price, and its type and data default to replay and nothing', () => {
   const { plans, rejected } = parseConfig({
@@ -142,4 +142,45 @@ test('the same admin twice is one admin, and admins do not touch the plans', () 
   assert.equal(admins.size, 1);
   assert.deepEqual(Object.keys(plans), ['monthly']);
   assert.deepEqual(rejected, []);
+});
+
+test('the placeholder the plugin writes is nobody, and is not reported as a mistake', () => {
+  const { admins, rejectedAdmins } = parseConfig({ admins: ADMINS_TEMPLATE });
+
+  assert.equal(admins.size, 0);
+  assert.deepEqual(rejectedAdmins, []);
+});
+
+const [PLACEHOLDER] = ADMINS_TEMPLATE;
+
+test('the placeholder can stay next to real admins, in any list shape', () => {
+  const list = parseConfig({ admins: [PLACEHOLDER, ALAN, ` ${PLACEHOLDER} `] });
+  const map = parseConfig({ admins: { 0: PLACEHOLDER, 1: ALAN } });
+
+  assert.deepEqual([...list.admins], [ALAN]);
+  assert.deepEqual(list.rejectedAdmins, []);
+  assert.deepEqual([...map.admins], [ALAN]);
+  assert.deepEqual(map.rejectedAdmins, []);
+});
+
+test('only the placeholder itself is let through, and any other mistake is still reported', () => {
+  const { rejectedAdmins } = parseConfig({
+    admins: [PLACEHOLDER, PLACEHOLDER.toUpperCase(), `${PLACEHOLDER}2`, 'placeholder', 'alan'],
+  });
+
+  assert.deepEqual(rejectedAdmins, [PLACEHOLDER.toUpperCase(), `${PLACEHOLDER}2`, 'placeholder', 'alan']);
+});
+
+test('the placeholder is written when the config has no admins at all, and only then', () => {
+  [undefined, null, 'x', 5, [], {}, { plans: {} }].forEach((config) => {
+    assert.equal(needsAdmins(config), true, JSON.stringify(config));
+  });
+  [{ admins: ADMINS_TEMPLATE }, { admins: [ALAN] }, { admins: ALAN }, { admins: '' }, { admins: [] }].forEach((config) => {
+    assert.equal(needsAdmins(config), false, JSON.stringify(config));
+  });
+});
+
+test('what is written as a template is a list holding one word that cannot be a username anywhere', () => {
+  assert.deepEqual(ADMINS_TEMPLATE, ['<placeholder>']);
+  assert.match(PLACEHOLDER, /^<.+>$/);
 });
