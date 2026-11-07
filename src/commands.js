@@ -1,10 +1,13 @@
 const MAX_CHOICES = 25;
+const GROUP = { group: 'voucher', groupDescription: 'Buy and see voucher codes' };
 
 const definitions = {
   'voucher-plans': {
+    ...GROUP,
     description: 'List the plans you can buy a voucher for',
   },
   'voucher-buy': {
+    ...GROUP,
     description: 'Buy a voucher code with FMC',
     private: true,
     args: [{
@@ -15,6 +18,7 @@ const definitions = {
     }],
   },
   'voucher-mine': {
+    ...GROUP,
     description: 'Show the voucher codes you bought',
     private: true,
   },

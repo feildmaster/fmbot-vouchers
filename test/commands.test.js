@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { validateCommands } = require('@basedakp48/plugin-utils');
+const { groupCommands, subcommandName, validateCommands } = require('@basedakp48/plugin-utils');
 const { buildDefinitions, definitions } = require('../src/commands');
 const privateReply = require('../src/reply');
 
@@ -60,6 +60,31 @@ test('the other commands and the plain definitions are not changed by the choice
   assert.deepEqual(offered['voucher-plans'], definitions['voucher-plans']);
   assert.deepEqual(offered['voucher-mine'], definitions['voucher-mine']);
   assert.equal('choices' in definitions['voucher-buy'].args[0], false);
+});
+
+test('all three commands are in the group voucher, as the subcommands buy, mine and plans', () => {
+  const named = Object.entries(buildDefinitions({}))
+    .map(([name, definition]) => ({ name, ...definition }));
+
+  const { standalone, groups, conflicts } = groupCommands(named);
+
+  assert.deepEqual(standalone, []);
+  assert.deepEqual(conflicts, []);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].name, 'voucher');
+  assert.equal(groups[0].description, 'Buy and see voucher codes');
+  assert.deepEqual(groups[0].subcommands.map(item => item.name).sort(), ['buy', 'mine', 'plans']);
+  named.forEach(command => assert.equal(subcommandName(command), command.name.replace('voucher-', '')));
+});
+
+test('the group does not change when the plans do', () => {
+  const none = buildDefinitions({});
+  const some = buildDefinitions({ month: { label: 'Month', price: 1 } });
+
+  Object.keys(none).forEach((name) => {
+    assert.equal(some[name].group, 'voucher');
+    assert.equal(some[name].groupDescription, none[name].groupDescription);
+  });
 });
 
 test('a private reply goes to the person, carrying the interaction id', () => {
