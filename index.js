@@ -13,6 +13,7 @@ const createCharge = require('./src/wallet');
 const RESUME_EVERY = 5 * 60 * 1000;
 const PLANS_EVERY = 5 * 60 * 1000;
 const QUICK_REFRESH = 3000;
+const STATUS_TIMEOUT = 3000;
 
 const template = process.env.VOUCHERS_URL;
 const vouchers = {
@@ -21,6 +22,7 @@ const vouchers = {
 };
 const reserve = createReserve(vouchers);
 const activate = createReserve.createActivate(vouchers);
+const status = createReserve.createStatus({ ...vouchers, timeout: STATUS_TIMEOUT });
 const charge = createCharge({
   key: process.env.WALLET_VOUCHERS_KEY,
   baseUrl: process.env.WALLET_URL || undefined,
@@ -115,6 +117,7 @@ const service = createService({
   reserve,
   charge,
   activate,
+  status,
   plans: currentPlans,
   refresh: refreshNow,
   redeemURL: process.env.VOUCHER_REDEEM_URL,

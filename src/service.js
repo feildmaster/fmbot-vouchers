@@ -12,6 +12,12 @@ const EXPIRED_TEXT = 'That offer ended, so nothing was bought. Use voucher buy f
 const GONE_TEXT = 'That offer is no longer valid. Use voucher buy for a new one.';
 const DONE_TEXT = 'That purchase was already confirmed. voucher-mine shows your codes.';
 const BUTTON = /^(confirm|cancel):(.+)$/;
+const SPENT = ['used', 'revoked', 'expired'];
+const STATUS_BATCH = 25;
+const MAX_CHECKED = 100;
+const GONE_HEADING = '**No longer usable**';
+const NO_UNUSED = 'You have no unused vouchers.';
+const NOT_CHECKED = "_I couldn't check which of these are used right now._";
 
 const shown = (text, extra = {}) => ({ text, hidden: false, ...extra });
 const hiddenReply = (text, extra = {}) => ({ text, hidden: true, ...extra });
@@ -36,6 +42,26 @@ function paginate(lines, title) {
   }));
 }
 
+function paginateRows(rows, title) {
+  const pages = [[]];
+  rows.forEach((row) => {
+    const current = pages[pages.length - 1];
+    const room = row.heading ? 2 : 1;
+    if (current.length > 0 && current.length + room > PAGE_SIZE) pages.push([row]);
+    else current.push(row);
+  });
+  return pages.map(page => ({
+    title,
+    color: COLOR,
+    description: page.map(row => (row.bullet ? `- ${row.text}` : row.text)).join('\n'),
+  }));
+}
+
+const chunk = (list, size) => Array.from(
+  { length: Math.ceil(list.length / size) },
+  (_, index) => list.slice(index * size, (index + 1) * size),
+);
+
 function chargeProblem(result) {
   if (!result) return 'The wallet gave no answer';
   if (result.error) return String(result.error);
@@ -50,11 +76,13 @@ module.exports = function createService({
   plans,
   redeemURL,
   linkURL,
+  status = async () => ({ vouchers: {} }),
   refresh = async () => {},
   now = Date.now,
   onError = console.error,
 }) {
   const settling = new Set();
+  let lastStatusProblem;
 
   const onSale = plan => plan.until !== undefined && now() < plan.until;
   const priceOf = plan => (plan.until !== undefined && !onSale(plan) ? plan.regular : plan.price);
@@ -138,21 +166,74 @@ module.exports = function createService({
     });
   }
 
+  async function checkSpent(purchases) {
+    const unchecked = purchases
+      .filter(purchase => purchase.status === 'ready' && purchase.code && !purchase.spent)
+      .slice(0, MAX_CHECKED);
+    const codes = [...new Set(unchecked.map(purchase => purchase.code))];
+    if (!codes.length) return { spent: new Map(), failed: false };
+
+    try {
+      const answers = await Promise.all(chunk(codes, STATUS_BATCH)
+        .map(batch => status({ codes: batch })));
+      const bad = answers.find(answer => !answer || answer.error || typeof answer.vouchers !== 'object');
+      if (bad) {
+        const reason = bad && bad.error ? bad.error : 'no answer';
+        throw new Error(`The vouchers service could not say which are used: ${reason}`);
+      }
+      const known = Object.assign({}, ...answers.map(answer => answer.vouchers));
+
+      const spent = new Map();
+      unchecked.forEach((purchase) => {
+        const answer = known[purchase.code];
+        if (answer && SPENT.includes(answer.status)) spent.set(purchase.id, answer.status);
+      });
+      await Promise.all([...spent].map(([id, state]) => store.setPurchase(id, { spent: state })
+        .catch(onError)));
+      lastStatusProblem = undefined;
+      return { spent, failed: false };
+    } catch (error) {
+      if (error.message !== lastStatusProblem) onError(error);
+      lastStatusProblem = error.message;
+      return { spent: new Map(), failed: true };
+    }
+  }
+
   async function mine(ctx) {
     const found = (await store.purchasesByUser(ctx.discordId))
       .filter(purchase => ['pending', 'ready'].includes(purchase.status))
       .sort((a, b) => timeOf(b) - timeOf(a));
     if (!found.length) return hiddenReply("You haven't bought a voucher yet.");
 
-    const lines = found.map((purchase) => {
-      const label = purchase.label || labelOf(purchase.plan);
+    const { spent, failed } = await checkSpent(found);
+    const stateOf = purchase => purchase.spent || spent.get(purchase.id);
+    const when = (purchase) => {
       const bought = timeOf(purchase);
-      const when = bought ? ` · bought <t:${Math.floor(bought / 1000)}:d>` : '';
-      return purchase.status === 'ready'
-        ? `${label}: \`${purchase.code}\`${when}`
-        : `${label}: still being processed${when}`;
-    });
-    return hiddenReply(`Your vouchers:\n${lines.join('\n')}`, { pages: paginate(lines, 'Your vouchers') });
+      return bought ? ` · bought <t:${Math.floor(bought / 1000)}:d>` : '';
+    };
+    const labelFor = purchase => purchase.label || labelOf(purchase.plan);
+
+    const usable = found.filter(purchase => !stateOf(purchase));
+    const gone = found.filter(purchase => stateOf(purchase));
+    const rows = [
+      ...(usable.length ? [] : [{ text: NO_UNUSED }]),
+      ...usable.map(purchase => ({
+        bullet: true,
+        text: purchase.status === 'ready'
+          ? `${labelFor(purchase)}: \`${purchase.code}\`${when(purchase)}`
+          : `${labelFor(purchase)}: still being processed${when(purchase)}`,
+      })),
+      ...(gone.length ? [{ text: GONE_HEADING, heading: true }] : []),
+      ...gone.map(purchase => ({
+        bullet: true,
+        text: `${labelFor(purchase)} · ${stateOf(purchase)}${when(purchase)}`,
+      })),
+      ...(failed ? [{ text: NOT_CHECKED }] : []),
+    ];
+    return hiddenReply(
+      `Your vouchers:\n${rows.map(row => row.text).join('\n')}`,
+      { pages: paginateRows(rows, 'Your vouchers') },
+    );
   }
 
   async function withdrawOffers(discordId) {
