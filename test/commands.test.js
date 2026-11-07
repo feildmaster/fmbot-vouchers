@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { groupCommands, subcommandName, validateCommands } = require('@basedakp48/plugin-utils');
+const {
+  contextMenus, groupCommands, subcommandName, validateCommands,
+} = require('@basedakp48/plugin-utils');
 const { buildDefinitions, definitions } = require('../src/commands');
 const privateReply = require('../src/reply');
 
@@ -12,7 +14,7 @@ test('the definitions pass the validation plugin-utils applies at startup', () =
 test('buying and listing your own codes are private, and the plan list is not', () => {
   const privateOnes = Object.keys(definitions).filter(name => definitions[name].private === true);
 
-  assert.deepEqual(privateOnes.sort(), ['voucher-buy', 'voucher-mine']);
+  assert.deepEqual(privateOnes.sort(), ['voucher-buy', 'voucher-mine', 'voucheradmin-list']);
 });
 
 test('buying takes the plan as its one required argument', () => {
@@ -62,19 +64,20 @@ test('the other commands and the plain definitions are not changed by the choice
   assert.equal('choices' in definitions['voucher-buy'].args[0], false);
 });
 
-test('all three commands are in the group voucher, as the subcommands buy, mine and plans', () => {
-  const named = Object.entries(buildDefinitions({}))
-    .map(([name, definition]) => ({ name, ...definition }));
+const named = () => Object.entries(buildDefinitions({}))
+  .map(([name, definition]) => ({ name, ...definition }));
 
-  const { standalone, groups, conflicts } = groupCommands(named);
+test('the three public commands are in the group voucher, as the subcommands buy, mine and plans', () => {
+  const { standalone, groups, conflicts } = groupCommands(named());
 
+  const group = groups.find(item => item.name === 'voucher');
   assert.deepEqual(standalone, []);
   assert.deepEqual(conflicts, []);
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].name, 'voucher');
-  assert.equal(groups[0].description, 'Buy and see voucher codes');
-  assert.deepEqual(groups[0].subcommands.map(item => item.name).sort(), ['buy', 'mine', 'plans']);
-  named.forEach(command => assert.equal(subcommandName(command), command.name.replace('voucher-', '')));
+  assert.equal(group.description, 'Buy and see voucher codes');
+  assert.deepEqual(group.subcommands.map(item => item.name).sort(), ['buy', 'mine', 'plans']);
+  group.subcommands.forEach(({ command }) => {
+    assert.equal(subcommandName(command), command.name.replace('voucher-', ''));
+  });
 });
 
 test('the group does not change when the plans do', () => {
@@ -82,9 +85,38 @@ test('the group does not change when the plans do', () => {
   const some = buildDefinitions({ month: { label: 'Month', price: 1 } });
 
   Object.keys(none).forEach((name) => {
-    assert.equal(some[name].group, 'voucher');
+    assert.equal(some[name].group, none[name].group);
     assert.equal(some[name].groupDescription, none[name].groupDescription);
   });
+});
+
+test('the admin command is in a group of its own, so the public group keeps its permissions', () => {
+  const { groups } = groupCommands(named());
+
+  const admin = groups.find(item => item.name === 'voucheradmin');
+  assert.deepEqual(admin.subcommands.map(item => item.name), ['list']);
+  assert.equal(groups.find(item => item.name === 'voucher').subcommands.length, 3);
+  ['voucher-plans', 'voucher-buy', 'voucher-mine'].forEach((name) => {
+    assert.equal(definitions[name].discord, undefined, name);
+  });
+});
+
+test('the admin command asks for the user, is hidden from members, and has a right-click menu', () => {
+  const admin = definitions['voucheradmin-list'];
+
+  assert.deepEqual(admin.args.map(arg => [arg.name, arg.type, arg.required]), [['user', 'user', true]]);
+  assert.deepEqual(admin.discord, { dmPermission: false, defaultMemberPermissions: '32' });
+  assert.deepEqual(admin.context, { type: 'user', arg: 'user', name: 'Show vouchers' });
+  assert.equal(admin.private, true);
+});
+
+test('the right-click menu is the one entry, and runs the admin command', () => {
+  const { user, message } = contextMenus(named());
+
+  assert.deepEqual(user.map(item => [item.name, item.command.name, item.arg]), [
+    ['Show vouchers', 'voucheradmin-list', 'user'],
+  ]);
+  assert.deepEqual(message, []);
 });
 
 test('a private reply goes to the person, carrying the interaction id', () => {

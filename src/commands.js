@@ -1,5 +1,9 @@
 const MAX_CHOICES = 25;
 const GROUP = { group: 'voucher', groupDescription: 'Buy and see voucher codes' };
+const ADMIN_GROUP = {
+  group: 'voucheradmin',
+  groupDescription: "Look at other people's vouchers",
+};
 
 const definitions = {
   'voucher-plans': {
@@ -21,6 +25,19 @@ const definitions = {
     ...GROUP,
     description: 'Show the voucher codes you bought',
     private: true,
+  },
+  'voucheradmin-list': {
+    ...ADMIN_GROUP,
+    description: 'Show the vouchers a person has bought',
+    private: true,
+    args: [{
+      name: 'user',
+      description: 'Whose vouchers',
+      type: 'user',
+      required: true,
+    }],
+    context: { type: 'user', arg: 'user', name: 'Show vouchers' },
+    discord: { dmPermission: false, defaultMemberPermissions: '32' },
   },
 };
 

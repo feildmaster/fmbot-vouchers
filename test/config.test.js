@@ -110,8 +110,36 @@ test('a pointer and a plan cannot share a name', () => {
   assert.deepEqual(rejected, ['Month']);
 });
 
-test('a missing or odd config gives no plans', () => {
+test('a missing or odd config gives no plans and no admins', () => {
   [undefined, null, 'x', {}, { plans: [] }, { plans: 'x' }].forEach((config) => {
-    assert.deepEqual(parseConfig(config), { plans: {}, pointers: {}, rejected: [] });
+    assert.deepEqual(parseConfig(config), {
+      plans: {}, pointers: {}, rejected: [], admins: new Set(), rejectedAdmins: [],
+    });
   });
+});
+
+const ALAN = '208562116590960640';
+
+test('admins are Discord ids written as text, in a list, as one id, or in an object', () => {
+  assert.deepEqual([...parseConfig({ admins: [ALAN, ' 123456789012345678 '] }).admins], [ALAN, '123456789012345678']);
+  assert.deepEqual([...parseConfig({ admins: ALAN }).admins], [ALAN]);
+  assert.deepEqual([...parseConfig({ admins: { first: ALAN } }).admins], [ALAN]);
+});
+
+test('an admin that is not a Discord id written as text is ignored and reported', () => {
+  const { admins, rejectedAdmins } = parseConfig({ admins: [ALAN, '12', 208562116590960640, 'alan', null] });
+
+  assert.deepEqual([...admins], [ALAN]);
+  assert.deepEqual(rejectedAdmins, ['12', 208562116590960640, 'alan', null]);
+});
+
+test('the same admin twice is one admin, and admins do not touch the plans', () => {
+  const { admins, plans, rejected } = parseConfig({
+    admins: [ALAN, ALAN],
+    plans: { monthly: { price: 100 } },
+  });
+
+  assert.equal(admins.size, 1);
+  assert.deepEqual(Object.keys(plans), ['monthly']);
+  assert.deepEqual(rejected, []);
 });

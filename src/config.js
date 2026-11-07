@@ -1,4 +1,5 @@
 const KEY = /^[a-z0-9-]{1,32}$/;
+const SNOWFLAKE = /^\d{15,25}$/;
 const TYPE = /^[a-z][a-z0-9-]{0,31}$/;
 const DEFAULT_TYPE = 'replay';
 const MAX_LABEL = 60;
@@ -6,6 +7,24 @@ const MAX_DATA = 4000;
 
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const asList = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') return [value];
+  if (isObject(value)) return Object.values(value);
+  return [];
+};
+
+function parseAdmins(value) {
+  const admins = new Set();
+  const rejectedAdmins = [];
+  asList(value).forEach((entry) => {
+    const id = typeof entry === 'string' ? entry.trim() : undefined;
+    if (id && SNOWFLAKE.test(id)) admins.add(id);
+    else rejectedAdmins.push(entry);
+  });
+  return { admins, rejectedAdmins };
+}
 
 function parsePlan(plan) {
   if (!isObject(plan)) return undefined;
@@ -54,7 +73,9 @@ function parseConfig(config) {
     plans[key] = { ...parsed, label: parsed.label || key };
   });
 
-  return { plans, pointers, rejected };
+  return {
+    plans, pointers, rejected, ...parseAdmins(source.admins),
+  };
 }
 
 module.exports = { parseConfig };

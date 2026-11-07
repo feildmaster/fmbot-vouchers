@@ -12,6 +12,7 @@ const EXPIRED_TEXT = 'That offer ended, so nothing was bought. Use voucher buy f
 const GONE_TEXT = 'That offer is no longer valid. Use voucher buy for a new one.';
 const DONE_TEXT = 'That purchase was already confirmed. voucher-mine shows your codes.';
 const BUTTON = /^(confirm|cancel):(.+)$/;
+const SNOWFLAKE = /^\d{15,25}$/;
 const SPENT = ['used', 'revoked', 'expired'];
 const STATUS_BATCH = 25;
 const MAX_CHECKED = 100;
@@ -57,6 +58,12 @@ function paginateRows(rows, title) {
   }));
 }
 
+function maskCode(code) {
+  const groups = String(code).split('-');
+  if (groups.length < 2) return `${code.slice(0, 4)}${'•'.repeat(Math.max(code.length - 4, 0))}`;
+  return [groups[0], ...groups.slice(1).map(group => '•'.repeat(group.length))].join('-');
+}
+
 const chunk = (list, size) => Array.from(
   { length: Math.ceil(list.length / size) },
   (_, index) => list.slice(index * size, (index + 1) * size),
@@ -77,6 +84,7 @@ module.exports = function createService({
   redeemURL,
   linkURL,
   status = async () => ({ vouchers: {} }),
+  isAdmin = () => false,
   refresh = async () => {},
   now = Date.now,
   onError = console.error,
@@ -199,12 +207,13 @@ module.exports = function createService({
     }
   }
 
-  async function mine(ctx) {
-    const found = (await store.purchasesByUser(ctx.discordId))
+  async function boughtBy(discordId) {
+    return (await store.purchasesByUser(discordId))
       .filter(purchase => ['pending', 'ready'].includes(purchase.status))
       .sort((a, b) => timeOf(b) - timeOf(a));
-    if (!found.length) return hiddenReply("You haven't bought a voucher yet.");
+  }
 
+  async function voucherRows(found, { mask = false } = {}) {
     const { spent, failed } = await checkSpent(found);
     const stateOf = purchase => purchase.spent || spent.get(purchase.id);
     const when = (purchase) => {
@@ -212,6 +221,7 @@ module.exports = function createService({
       return bought ? ` · bought <t:${Math.floor(bought / 1000)}:d>` : '';
     };
     const labelFor = purchase => purchase.label || labelOf(purchase.plan);
+    const codeFor = purchase => (mask ? maskCode(purchase.code) : purchase.code);
 
     const usable = found.filter(purchase => !stateOf(purchase));
     const gone = found.filter(purchase => stateOf(purchase));
@@ -220,7 +230,7 @@ module.exports = function createService({
       ...usable.map(purchase => ({
         bullet: true,
         text: purchase.status === 'ready'
-          ? `${labelFor(purchase)}: \`${purchase.code}\`${when(purchase)}`
+          ? `${labelFor(purchase)}: \`${codeFor(purchase)}\`${when(purchase)}`
           : `${labelFor(purchase)}: still being processed${when(purchase)}`,
       })),
       ...(gone.length ? [{ text: GONE_HEADING, heading: true }] : []),
@@ -230,9 +240,34 @@ module.exports = function createService({
       })),
       ...(failed ? [{ text: NOT_CHECKED }] : []),
     ];
+    return rows;
+  }
+
+  async function mine(ctx) {
+    const found = await boughtBy(ctx.discordId);
+    if (!found.length) return hiddenReply("You haven't bought a voucher yet.");
+
+    const rows = await voucherRows(found);
     return hiddenReply(
       `Your vouchers:\n${rows.map(row => row.text).join('\n')}`,
       { pages: paginateRows(rows, 'Your vouchers') },
+    );
+  }
+
+  async function adminList(ctx, { user }) {
+    if (!isAdmin(ctx.discordId)) return hiddenReply('Only admins can do that.');
+    const id = String(user === undefined || user === null ? '' : user).trim();
+    if (!SNOWFLAKE.test(id)) return hiddenReply('Pick a user from the list.');
+
+    const found = await boughtBy(id);
+    if (!found.length) return hiddenReply(`<@${id}> hasn't bought a voucher.`);
+    const rows = [
+      { text: `Vouchers bought by <@${id}>` },
+      ...(await voucherRows(found, { mask: true })),
+    ];
+    return hiddenReply(
+      rows.map(row => row.text).join('\n'),
+      { pages: paginateRows(rows, 'Vouchers') },
     );
   }
 
@@ -353,6 +388,7 @@ module.exports = function createService({
     'voucher-plans': list,
     'voucher-buy': buy,
     'voucher-mine': mine,
+    'voucheradmin-list': adminList,
   };
 
   return {

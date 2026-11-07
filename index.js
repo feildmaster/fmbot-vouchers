@@ -35,6 +35,7 @@ const report = error => plugin.sendError(error).then(sent => sent || console.err
 const state = {
   configured: {},
   pointers: {},
+  admins: new Set(),
   live: undefined,
   published: undefined,
   failing: false,
@@ -103,7 +104,12 @@ plugin.on('config', (config) => {
   const parsed = parseConfig(config);
   state.configured = parsed.plans;
   state.pointers = parsed.pointers;
+  state.admins = parsed.admins;
   if (parsed.rejected.length) report(ignoredPlans(parsed.rejected));
+  if (parsed.rejectedAdmins.length) {
+    const entries = parsed.rejectedAdmins.map(entry => JSON.stringify(entry)).join(', ');
+    report(new Error(`Ignored admins that are not Discord IDs written as text: ${entries}`));
+  }
   publishCommands();
 });
 
@@ -118,6 +124,7 @@ const service = createService({
   charge,
   activate,
   status,
+  isAdmin: discordId => typeof discordId === 'string' && state.admins.has(discordId),
   plans: currentPlans,
   refresh: refreshNow,
   redeemURL: process.env.VOUCHER_REDEEM_URL,
