@@ -10,17 +10,19 @@ module.exports = function createStore({ db, FieldValue }) {
 
   return {
     async createPurchase({
-      discordId, name, plan, type, data, amount, memo,
+      discordId, name, plan, label, type, data, amount, memo, note,
     }) {
       const ref = purchases.doc();
       const purchase = {
         discordId,
         name,
         plan,
+        label,
         type,
         data,
         amount,
         memo,
+        note,
         status: 'pending',
         createdAt: FieldValue.serverTimestamp(),
       };

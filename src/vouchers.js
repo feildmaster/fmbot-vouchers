@@ -26,8 +26,10 @@ const createCall = (name, fields) => function createVoucherCall({
   };
 };
 
-const createReserve = createCall('clientCreate', ({ type, data, requestId }) => ({
-  type, data, requestId,
+const createReserve = createCall('clientCreate', ({
+  type, data, note, requestId,
+}) => ({
+  type, data, note, requestId,
 }));
 
 createReserve.createActivate = createCall('clientActivate', ({ requestId }) => ({ requestId }));

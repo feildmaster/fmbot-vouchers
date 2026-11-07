@@ -98,6 +98,30 @@ test('a resumed purchase reserves what it was bought as, even if the plan change
   assert.equal(calls[1][1].amount, 5);
 });
 
+test('the voucher is reserved with a note saying who bought what', async () => {
+  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+
+  assert.equal(calls[0][1].note, 'Monthly (monthly) bought by Alan (Discord 111)');
+});
+
+test('a long name cannot make the note longer than the limit', async () => {
+  await service.run('voucher-buy', { discordId: '111', name: 'x'.repeat(500) }, { plan: 'monthly' });
+
+  assert.equal(calls[0][1].note.length, 200);
+});
+
+test('a resumed purchase reserves with the note it started with', async () => {
+  replies.activate = async () => { throw new Error('down'); };
+  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const first = calls[0][1].note;
+  replies.activate = async () => ({ code: 'AAAA-BBBB-CCCC' });
+  calls = [];
+
+  await service.resume();
+
+  assert.equal(calls[0][1].note, first);
+});
+
 test('the reply points at the place to redeem when one is configured', async () => {
   service = build({ redeemURL: 'https://redeem.test' });
 
@@ -259,9 +283,55 @@ test('voucher-plans lists the plans for everyone to see', async () => {
   const reply = await service.run('voucher-plans', ALAN);
 
   assert.equal(reply.hidden, false);
-  assert.match(reply.text, /monthly: Monthly for 100 FMC/);
-  assert.match(reply.text, /yearly: Yearly for 1,000 FMC/);
-  assert.match(reply.text, /badge: Early badge for 5 FMC/);
+  assert.match(reply.text, /Monthly for 100 FMC/);
+  assert.match(reply.text, /Yearly for 1,000 FMC/);
+  assert.match(reply.text, /Early badge for 5 FMC/);
+});
+
+const MENU = {
+  'replay-month': {
+    price: 100, type: 'replay', data: { plan: 'month', months: 1 }, label: 'Replay Pro, 1 month',
+  },
+};
+
+test('the plan list shows the labels and never the names behind them', async () => {
+  service = build({ plans: () => MENU });
+
+  const reply = await service.run('voucher-plans', ALAN);
+
+  assert.match(reply.text, /Replay Pro, 1 month for 100 FMC/);
+  assert.doesNotMatch(reply.text, /replay-month/);
+  assert.doesNotMatch(reply.text, /\bmonth:/);
+});
+
+test('a plan can be bought by its label as well as by its name', async () => {
+  service = build({ plans: () => MENU });
+
+  await service.run('voucher-buy', ALAN, { plan: 'replay-month' });
+  await service.run('voucher-buy', ALAN, { plan: '  replay pro, 1 MONTH ' });
+
+  assert.equal(calls.filter(([name]) => name === 'reserve').length, 2);
+  assert.deepEqual(calls[0][1].data, { plan: 'month', months: 1 });
+});
+
+test('a plan the menu does not have is refused without naming the plans behind it', async () => {
+  service = build({ plans: () => MENU });
+
+  const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
+
+  assert.match(reply.text, /no plan called "month"/);
+  assert.equal(calls.length, 0);
+});
+
+test('the purchase keeps the label it was bought under, and voucher-mine shows it', async () => {
+  service = build({ plans: () => MENU });
+  await service.run('voucher-buy', ALAN, { plan: 'replay-month' });
+  service = build({ plans: () => ({}) });
+
+  const reply = await service.run('voucher-mine', ALAN);
+
+  assert.match(reply.text, /Replay Pro, 1 month: `AAAA-BBBB-CCCC`/);
+  assert.equal(purchases()[0].label, 'Replay Pro, 1 month');
 });
 
 const SALE = {
@@ -276,7 +346,7 @@ test('during a sale the sale price is charged and the plan list says when it end
   const listed = await service.run('voucher-plans', ALAN);
   const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
 
-  assert.match(listed.text, /month: Month for 80 FMC \(sale ends <t:10:R>, normally 100\)/);
+  assert.match(listed.text, /Month for 80 FMC \(sale ends <t:10:R>, normally 100\)/);
   assert.equal(calls[1][1].amount, 80);
   assert.match(reply.text, /You paid 80 FMC/);
   assert.equal(purchases()[0].amount, 80);
@@ -288,7 +358,7 @@ test('once the sale has ended the regular price is charged, even before the plan
   const listed = await service.run('voucher-plans', ALAN);
   const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
 
-  assert.match(listed.text, /month: Month for 100 FMC$/);
+  assert.match(listed.text, /Month for 100 FMC$/);
   assert.equal(calls[1][1].amount, 100);
   assert.match(reply.text, /You paid 100 FMC/);
 });
@@ -346,7 +416,7 @@ test('the plan list is refreshed too', async () => {
     },
   });
 
-  assert.match((await service.run('voucher-plans', ALAN)).text, /monthly: Monthly for 100 FMC/);
+  assert.match((await service.run('voucher-plans', ALAN)).text, /Monthly for 100 FMC/);
 });
 
 test('a refresh that fails does not stop a purchase, and is reported', async () => {

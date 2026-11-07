@@ -18,14 +18,14 @@ test('a reservation is signed with the key and sends only what the service accep
   const reserve = createReserve({ key: 'secret', fetch });
 
   const reply = await reserve({
-    type: 'replay', data: { plan: 'monthly' }, requestId: 'voucher-abc12345', uses: 99,
+    type: 'replay', data: { plan: 'monthly' }, note: 'Bought by Alan', requestId: 'voucher-abc12345', uses: 99,
   });
 
   assert.deepEqual(reply, { code: 'AAAA-BBBB-CCCC' });
   const [{ url, options }] = calls;
   assert.equal(url, 'https://vouchers-clientcreate-esvpmf7qta-uc.a.run.app');
   assert.deepEqual(JSON.parse(options.body), {
-    type: 'replay', data: { plan: 'monthly' }, requestId: 'voucher-abc12345',
+    type: 'replay', data: { plan: 'monthly' }, note: 'Bought by Alan', requestId: 'voucher-abc12345',
   });
   assert.equal(
     options.headers.http_x_signature,

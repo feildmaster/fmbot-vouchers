@@ -21,23 +21,40 @@ function parsePlan(plan) {
   };
 }
 
+function parsePointer(entry) {
+  if (!isObject(entry) || typeof entry.plan !== 'string' || entry.price !== undefined) return undefined;
+  const plan = entry.plan.trim().toLowerCase();
+  const label = typeof entry.label === 'string' ? entry.label.trim().slice(0, MAX_LABEL) : '';
+  return KEY.test(plan) ? { plan, label } : undefined;
+}
+
+const isPointer = entry => isObject(entry) && typeof entry.plan === 'string' && entry.price === undefined;
+
 function parseConfig(config) {
   const source = config && typeof config === 'object' ? config : {};
   const entries = isObject(source.plans) ? Object.entries(source.plans) : [];
 
   const plans = {};
+  const pointers = {};
   const rejected = [];
-  entries.forEach(([name, plan]) => {
+  entries.forEach(([name, entry]) => {
     const key = name.trim().toLowerCase();
-    const parsed = parsePlan(plan);
-    if (!KEY.test(key) || !parsed || Object.hasOwn(plans, key)) {
+    const taken = Object.hasOwn(plans, key) || Object.hasOwn(pointers, key);
+    if (isPointer(entry)) {
+      const pointer = parsePointer(entry);
+      if (!KEY.test(key) || !pointer || taken) rejected.push(name);
+      else pointers[key] = pointer;
+      return;
+    }
+    const parsed = parsePlan(entry);
+    if (!KEY.test(key) || !parsed || taken) {
       rejected.push(name);
       return;
     }
     plans[key] = { ...parsed, label: parsed.label || key };
   });
 
-  return { plans, rejected };
+  return { plans, pointers, rejected };
 }
 
 module.exports = { parseConfig };

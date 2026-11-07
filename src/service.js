@@ -2,6 +2,7 @@ const { fmt } = require('./format');
 
 const PROVIDER = 'discord.com';
 const PAGE_SIZE = 10;
+const MAX_NOTE = 200;
 const COLOR = 0x5865f2;
 const RETRY_TEXT = "I couldn't finish your purchase yet. It will be retried on its own, so check voucher-mine in a few minutes before buying again.";
 
@@ -59,7 +60,9 @@ module.exports = function createService({
     settling.add(purchase.id);
     try {
       const requestId = requestIdOf(purchase);
-      const reserved = await reserve({ type: purchase.type, data: purchase.data, requestId });
+      const reserved = await reserve({
+        type: purchase.type, data: purchase.data, note: purchase.note, requestId,
+      });
       if (!reserved || reserved.error || typeof reserved.code !== 'string') {
         const reason = reserved && reserved.error ? String(reserved.error) : 'No code was returned';
         await store.setPurchase(purchase.id, { status: 'failed', reason: `Reserve: ${reason}` });
@@ -102,8 +105,15 @@ module.exports = function createService({
     }
   }
 
-  const planLine = ([key, plan]) => {
-    const line = `${key}: ${plan.label} for ${fmt(priceOf(plan))} FMC`;
+  const findPlan = (asked) => {
+    const wanted = String(asked || '').trim().toLowerCase();
+    const all = plans();
+    if (Object.hasOwn(all, wanted)) return wanted;
+    return Object.keys(all).find(key => all[key].label.toLowerCase() === wanted);
+  };
+
+  const planLine = (plan) => {
+    const line = `${plan.label} for ${fmt(priceOf(plan))} FMC`;
     if (!onSale(plan)) return line;
     return `${line} (sale ends <t:${Math.floor(plan.until / 1000)}:R>, normally ${fmt(plan.regular)})`;
   };
@@ -112,7 +122,7 @@ module.exports = function createService({
 
   async function list() {
     await freshen();
-    const lines = Object.entries(plans()).map(planLine);
+    const lines = Object.values(plans()).map(planLine);
     if (!lines.length) return shown('No plans are for sale yet.');
     return shown(`Plans you can buy with voucher-buy:\n${lines.join('\n')}`, {
       pages: paginate(lines, 'Voucher plans'),
@@ -126,7 +136,7 @@ module.exports = function createService({
     if (!found.length) return hiddenReply("You haven't bought a voucher yet.");
 
     const lines = found.map((purchase) => {
-      const label = labelOf(purchase.plan);
+      const label = purchase.label || labelOf(purchase.plan);
       return purchase.status === 'ready'
         ? `${label}: \`${purchase.code}\``
         : `${label}: still being processed`;
@@ -135,12 +145,11 @@ module.exports = function createService({
   }
 
   async function buy(ctx, { plan: asked }) {
-    const key = String(asked || '').trim().toLowerCase();
     await freshen();
-    if (!Object.hasOwn(plans(), key)) {
-      const names = Object.keys(plans());
-      return hiddenReply(names.length
-        ? `There is no plan called "${key}". Use voucher-plans to see them.`
+    const key = findPlan(asked);
+    if (key === undefined) {
+      return hiddenReply(Object.keys(plans()).length
+        ? `There is no plan called "${String(asked || '').trim()}". Use voucher-plans to see them.`
         : 'No plans are for sale yet.');
     }
     if (buying.has(ctx.discordId)) return hiddenReply('Your last purchase is still going through.');
@@ -152,10 +161,12 @@ module.exports = function createService({
         discordId: ctx.discordId,
         name: ctx.name,
         plan: key,
+        label: entry.label,
         type: entry.type,
         data: entry.data,
         amount: priceOf(entry),
         memo: `Voucher: ${entry.label}`,
+        note: `${entry.label} (${key}) bought by ${ctx.name} (Discord ${ctx.discordId})`.slice(0, MAX_NOTE),
       });
 
       let outcome;

@@ -2,6 +2,7 @@ const utils = require('@basedakp48/plugin-utils');
 const admin = require('firebase-admin');
 const { buildDefinitions, definitions } = require('./src/commands');
 const { parseConfig } = require('./src/config');
+const buildMenu = require('./src/menu');
 const privateReply = require('./src/reply');
 const createService = require('./src/service');
 const createFetchPlans = require('./src/remotePlans');
@@ -31,18 +32,32 @@ const report = error => plugin.sendError(error).then(sent => sent || console.err
 
 const state = {
   configured: {},
+  pointers: {},
   live: undefined,
   published: undefined,
   failing: false,
   ignored: '',
+  missing: '',
   refreshing: undefined,
 };
 
-const currentPlans = () => state.live || state.configured;
+const menu = () => (state.live
+  ? buildMenu(state.live, state.pointers)
+  : { plans: state.configured, missing: [] });
 
-const ignoredPlans = names => new Error(`Ignored plans that need a short name, a whole price in FMC, a valid type that is not credit, and data that is an object: ${names.join(', ')}`);
+const currentPlans = () => menu().plans;
+
+const ignoredPlans = names => new Error(`Ignored plans that need a short name, then either a whole price in FMC, a valid type that is not credit and data that is an object, or the plan of the plans address they point at: ${names.join(', ')}`);
+
+function reportMissing() {
+  const missing = menu().missing.join(', ');
+  if (missing === state.missing) return;
+  state.missing = missing;
+  if (missing) report(new Error(`Not offering plans that point at a plan the plans address does not have: ${missing}`));
+}
 
 function publishCommands() {
+  reportMissing();
   const offered = buildDefinitions(currentPlans());
   const serialized = JSON.stringify(offered);
   if (serialized === state.published) return;
@@ -87,7 +102,8 @@ function refreshNow() {
 plugin.on('config', (config) => {
   const parsed = parseConfig(config);
   state.configured = parsed.plans;
-  if (parsed.rejected.length && !fetchPlans) report(ignoredPlans(parsed.rejected));
+  state.pointers = parsed.pointers;
+  if (parsed.rejected.length) report(ignoredPlans(parsed.rejected));
   publishCommands();
 });
 

@@ -63,8 +63,55 @@ test('a name that repeats once lowercased keeps the first plan', () => {
   assert.deepEqual(rejected, ['monthly']);
 });
 
+test('an entry that names a plan of the plans address is a pointer, with its own label', () => {
+  const { plans, pointers, rejected } = parseConfig({
+    plans: {
+      'Replay-Month': { plan: ' Month ', label: ' Replay Pro, 1 month ' },
+      plain: { plan: 'slot' },
+    },
+  });
+
+  assert.deepEqual(plans, {});
+  assert.deepEqual(pointers, {
+    'replay-month': { plan: 'month', label: 'Replay Pro, 1 month' },
+    plain: { plan: 'slot', label: '' },
+  });
+  assert.deepEqual(rejected, []);
+});
+
+test('a pointer with a bad name or a bad plan is ignored and reported', () => {
+  const { pointers, rejected } = parseConfig({
+    plans: {
+      'bad name': { plan: 'month' },
+      empty: { plan: '' },
+      spaced: { plan: 'two words' },
+      fine: { plan: 'month' },
+    },
+  });
+
+  assert.deepEqual(Object.keys(pointers), ['fine']);
+  assert.deepEqual(rejected, ['bad name', 'empty', 'spaced']);
+});
+
+test('an entry with a price is a plan of its own even if it also names a plan', () => {
+  const { plans, pointers } = parseConfig({ plans: { own: { price: 5, plan: 'month' } } });
+
+  assert.deepEqual(Object.keys(plans), ['own']);
+  assert.deepEqual(pointers, {});
+});
+
+test('a pointer and a plan cannot share a name', () => {
+  const { plans, pointers, rejected } = parseConfig({
+    plans: { month: { price: 5 }, Month: { plan: 'month' } },
+  });
+
+  assert.deepEqual(Object.keys(plans), ['month']);
+  assert.deepEqual(pointers, {});
+  assert.deepEqual(rejected, ['Month']);
+});
+
 test('a missing or odd config gives no plans', () => {
   [undefined, null, 'x', {}, { plans: [] }, { plans: 'x' }].forEach((config) => {
-    assert.deepEqual(parseConfig(config), { plans: {}, rejected: [] });
+    assert.deepEqual(parseConfig(config), { plans: {}, pointers: {}, rejected: [] });
   });
 });
