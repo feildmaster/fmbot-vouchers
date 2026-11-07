@@ -1,14 +1,23 @@
-const { purchase: purchaseEmbed } = require('./embed');
+const { confirmation: confirmationEmbed, purchase: purchaseEmbed } = require('./embed');
 const { fmt } = require('./format');
 
 const PROVIDER = 'discord.com';
 const PAGE_SIZE = 10;
 const MAX_NOTE = 200;
 const COLOR = 0x5865f2;
+const OFFER_TTL = 10 * 60 * 1000;
+const SWEEP_AFTER = 60 * 60 * 1000;
 const RETRY_TEXT = "I couldn't finish your purchase yet. It will be retried on its own, so check voucher-mine in a few minutes before buying again.";
+const EXPIRED_TEXT = 'That offer ended, so nothing was bought. Use voucher buy for a new one.';
+const GONE_TEXT = 'That offer is no longer valid. Use voucher buy for a new one.';
+const DONE_TEXT = 'That purchase was already confirmed. voucher-mine shows your codes.';
+const BUTTON = /^(confirm|cancel):(.+)$/;
 
 const shown = (text, extra = {}) => ({ text, hidden: false, ...extra });
 const hiddenReply = (text, extra = {}) => ({ text, hidden: true, ...extra });
+const update = (text, extra = {}) => ({
+  text, hidden: true, update: true, ...extra,
+});
 
 const requestIdOf = purchase => `voucher-${purchase.id}`;
 const timeOf = purchase => (purchase.createdAt && purchase.createdAt.toMillis
@@ -45,7 +54,6 @@ module.exports = function createService({
   now = Date.now,
   onError = console.error,
 }) {
-  const buying = new Set();
   const settling = new Set();
 
   const onSale = plan => plan.until !== undefined && now() < plan.until;
@@ -132,7 +140,7 @@ module.exports = function createService({
 
   async function mine(ctx) {
     const found = (await store.purchasesByUser(ctx.discordId))
-      .filter(purchase => purchase.status !== 'failed')
+      .filter(purchase => ['pending', 'ready'].includes(purchase.status))
       .sort((a, b) => timeOf(b) - timeOf(a));
     if (!found.length) return hiddenReply("You haven't bought a voucher yet.");
 
@@ -147,6 +155,28 @@ module.exports = function createService({
     return hiddenReply(`Your vouchers:\n${lines.join('\n')}`, { pages: paginate(lines, 'Your vouchers') });
   }
 
+  async function withdrawOffers(discordId) {
+    const open = (await store.purchasesByUser(discordId))
+      .filter(purchase => purchase.status === 'awaiting');
+    await Promise.all(open.map(purchase => store.claimPurchase(purchase.id, 'awaiting', 'expired')));
+  }
+
+  function offer(purchase, entry) {
+    const sale = onSale(entry) ? { regular: entry.regular, until: entry.until } : {};
+    return hiddenReply(
+      `Buy ${purchase.label} for ${fmt(purchase.amount)} FMC? Use the buttons to confirm, or cancel.`,
+      {
+        embed: confirmationEmbed({
+          label: purchase.label, price: purchase.amount, expiresAt: purchase.expiresAt, ...sale,
+        }),
+        components: [
+          { id: `confirm:${purchase.id}`, label: 'Confirm', style: 'success' },
+          { id: `cancel:${purchase.id}`, label: 'Cancel' },
+        ],
+      },
+    );
+  }
+
   async function buy(ctx, { plan: asked }) {
     await freshen();
     const key = findPlan(asked);
@@ -155,44 +185,87 @@ module.exports = function createService({
         ? `There is no plan called "${String(asked || '').trim()}". Use voucher-plans to see them.`
         : 'No plans are for sale yet.');
     }
-    if (buying.has(ctx.discordId)) return hiddenReply('Your last purchase is still going through.');
 
     const entry = plans()[key];
-    buying.add(ctx.discordId);
-    try {
-      const purchase = await store.createPurchase({
-        discordId: ctx.discordId,
-        name: ctx.name,
-        plan: key,
-        label: entry.label,
-        type: entry.type,
-        data: entry.data,
-        amount: priceOf(entry),
-        memo: `Voucher: ${entry.label}`,
-        note: `${entry.label} (${key}) bought by ${ctx.name} (Discord ${ctx.discordId})`.slice(0, MAX_NOTE),
-      });
+    await withdrawOffers(ctx.discordId);
+    const purchase = await store.createPurchase({
+      discordId: ctx.discordId,
+      name: ctx.name,
+      plan: key,
+      label: entry.label,
+      type: entry.type,
+      data: entry.data,
+      amount: priceOf(entry),
+      memo: `Voucher: ${entry.label}`,
+      note: `${entry.label} (${key}) bought by ${ctx.name} (Discord ${ctx.discordId})`.slice(0, MAX_NOTE),
+      status: 'awaiting',
+      expiresAt: now() + OFFER_TTL,
+    });
+    return offer(purchase, entry);
+  }
 
-      let outcome;
-      try {
-        outcome = await settle(purchase);
-      } catch (error) {
-        onError(error);
-        return hiddenReply(RETRY_TEXT);
-      }
-      if (!outcome.ready) return hiddenReply(refusal(outcome.error));
-
-      const redeem = redeemURL ? ` Redeem it at ${redeemURL}.` : '';
-      return hiddenReply(
-        `Here is your ${entry.label} voucher: \`${outcome.code}\`. You paid ${fmt(purchase.amount)} FMC.${redeem} If you lose this message, voucher-mine shows it again.`,
-        {
-          embed: purchaseEmbed({
-            label: entry.label, code: outcome.code, amount: purchase.amount, redeemURL,
-          }),
-        },
-      );
-    } finally {
-      buying.delete(ctx.discordId);
+  async function openOffer(ctx, id) {
+    const purchase = await store.getPurchase(id);
+    if (!purchase || purchase.discordId !== ctx.discordId) {
+      return { reply: hiddenReply("That isn't your purchase.") };
     }
+    if (purchase.status !== 'awaiting') {
+      return { reply: update(['pending', 'ready'].includes(purchase.status) ? DONE_TEXT : GONE_TEXT) };
+    }
+    if (now() > purchase.expiresAt) {
+      await store.claimPurchase(id, 'awaiting', 'expired');
+      return { reply: update(EXPIRED_TEXT) };
+    }
+    return { purchase };
+  }
+
+  async function confirm(ctx, id) {
+    await freshen();
+    const { purchase, reply } = await openOffer(ctx, id);
+    if (reply) return reply;
+
+    const entry = Object.hasOwn(plans(), purchase.plan) ? plans()[purchase.plan] : undefined;
+    if (!entry || priceOf(entry) !== purchase.amount) {
+      await store.claimPurchase(id, 'awaiting', 'expired');
+      return update(entry
+        ? `The price changed to ${fmt(priceOf(entry))} FMC, so nothing was bought. Use voucher buy to see the new offer.`
+        : 'That plan is not for sale any more, so nothing was bought.');
+    }
+
+    const claimed = await store.claimPurchase(id, 'awaiting', 'pending');
+    if (!claimed) return update(DONE_TEXT);
+
+    let outcome;
+    try {
+      outcome = await settle(claimed);
+    } catch (error) {
+      onError(error);
+      return update(RETRY_TEXT);
+    }
+    if (!outcome.ready) return update(refusal(outcome.error));
+
+    const redeem = redeemURL ? ` Redeem it at ${redeemURL}.` : '';
+    return update(
+      `Here is your ${claimed.label} voucher: \`${outcome.code}\`. You paid ${fmt(claimed.amount)} FMC.${redeem} If you lose this message, voucher-mine shows it again.`,
+      {
+        embed: purchaseEmbed({
+          label: claimed.label, code: outcome.code, amount: claimed.amount, redeemURL,
+        }),
+      },
+    );
+  }
+
+  async function cancel(ctx, id) {
+    const { purchase, reply } = await openOffer(ctx, id);
+    if (reply) return reply;
+    await store.claimPurchase(purchase.id, 'awaiting', 'cancelled');
+    return update('Cancelled. Nothing was taken.');
+  }
+
+  async function component(ctx, componentId) {
+    const match = BUTTON.exec(String(componentId));
+    if (!match) return hiddenReply('That button is not available any more.');
+    return match[1] === 'confirm' ? confirm(ctx, match[2]) : cancel(ctx, match[2]);
   }
 
   const handlers = {
@@ -204,11 +277,17 @@ module.exports = function createService({
   return {
     run: (command, ctx, args = {}) => handlers[command](ctx, args),
 
+    component,
+
     async resume() {
       const pending = (await store.pendingPurchases()).filter(item => !settling.has(item.id));
       await pending.reduce((chain, item) => chain
         .then(() => settle(item))
         .catch(onError), Promise.resolve());
+
+      const stale = (await store.awaitingPurchases())
+        .filter(item => now() - (Number(item.expiresAt) || 0) > SWEEP_AFTER);
+      await Promise.all(stale.map(item => store.deletePurchase(item.id).catch(onError)));
       return pending.length;
     },
   };

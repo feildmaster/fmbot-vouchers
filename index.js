@@ -129,22 +129,35 @@ setInterval(() => service.resume().catch(report), RESUME_EVERY).unref();
 plugin.defaultCommands(definitions);
 
 function answer(msg, {
-  text, hidden, embed, pages,
+  text, hidden, embed, pages, components, update,
 }) {
   const system = plugin.messageSystem();
-  if (hidden) return system.sendMessage(privateReply(plugin, msg, text, { embed, pages }));
+  if (hidden) {
+    return system.sendMessage(privateReply(plugin, msg, text, {
+      embed, pages, components, update,
+    }));
+  }
   const data = {};
   if (embed) data.discord_embed = embed;
   if (pages) data.discord_pages = pages;
+  if (components) data.discord_components = components;
   return system.sendText(text, msg, Object.keys(data).length ? data : undefined);
 }
+
+const contextOf = msg => ({ discordId: msg.uid, name: msg.data.nick || msg.uid });
+
+plugin.onComponent((msg) => {
+  if (msg.data.connectorType !== 'discord') return;
+  service.component(contextOf(msg), msg.data.componentId)
+    .then(reply => answer(msg, reply))
+    .catch(report);
+});
 
 plugin.messageSystem().on('message/command', (msg) => {
   if (!msg.data || msg.data.connectorType !== 'discord') return;
   if (!Object.hasOwn(definitions, msg.data.command)) return;
 
-  const context = { discordId: msg.uid, name: msg.data.nick || msg.uid };
-  service.run(msg.data.command, context, msg.data.args)
+  service.run(msg.data.command, contextOf(msg), msg.data.args)
     .then(reply => answer(msg, reply))
     .catch(report);
 });

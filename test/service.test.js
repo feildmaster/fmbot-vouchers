@@ -60,8 +60,14 @@ beforeEach(() => {
 
 const purchases = () => [...fake.data.entries()].map(([path, value]) => ({ path, ...value }));
 
+const buy = async (ctx, args) => {
+  const prompt = await service.run('voucher-buy', ctx, args);
+  if (!prompt.components) return prompt;
+  return service.component(ctx, prompt.components[0].id);
+};
+
 test('a purchase reserves, then charges, then activates, all under one request id', async () => {
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.deepEqual(calls.map(([name]) => name), ['reserve', 'charge', 'activate']);
   const ids = calls.map(([, input]) => input.requestId);
@@ -77,7 +83,7 @@ test('a purchase reserves, then charges, then activates, all under one request i
 });
 
 test('a plan that is not a month count reserves its own type and data', async () => {
-  await service.run('voucher-buy', ALAN, { plan: 'badge' });
+  await buy(ALAN, { plan: 'badge' });
 
   assert.equal(calls[0][1].type, 'badge');
   assert.deepEqual(calls[0][1].data, { id: 'early' });
@@ -86,7 +92,7 @@ test('a plan that is not a month count reserves its own type and data', async ()
 
 test('a resumed purchase reserves what it was bought as, even if the plan changed since', async () => {
   replies.activate = async () => { throw new Error('down'); };
-  await service.run('voucher-buy', ALAN, { plan: 'badge' });
+  await buy(ALAN, { plan: 'badge' });
   service = build({ plans: () => ({}) });
   replies.activate = async () => ({ code: 'AAAA-BBBB-CCCC' });
   calls = [];
@@ -99,20 +105,20 @@ test('a resumed purchase reserves what it was bought as, even if the plan change
 });
 
 test('the voucher is reserved with a note saying who bought what', async () => {
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
 
   assert.equal(calls[0][1].note, 'Monthly (monthly) bought by Alan (Discord 111)');
 });
 
 test('a long name cannot make the note longer than the limit', async () => {
-  await service.run('voucher-buy', { discordId: '111', name: 'x'.repeat(500) }, { plan: 'monthly' });
+  await buy({ discordId: '111', name: 'x'.repeat(500) }, { plan: 'monthly' });
 
   assert.equal(calls[0][1].note.length, 200);
 });
 
 test('a resumed purchase reserves with the note it started with', async () => {
   replies.activate = async () => { throw new Error('down'); };
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
   const first = calls[0][1].note;
   replies.activate = async () => ({ code: 'AAAA-BBBB-CCCC' });
   calls = [];
@@ -125,13 +131,13 @@ test('a resumed purchase reserves with the note it started with', async () => {
 test('the reply points at the place to redeem when one is configured', async () => {
   service = build({ redeemURL: 'https://redeem.test' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /https:\/\/redeem\.test/);
 });
 
 test('an unknown plan costs nothing and is not recorded', async () => {
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'weekly' });
+  const reply = await buy(ALAN, { plan: 'weekly' });
 
   assert.match(reply.text, /no plan called "weekly"/);
   assert.equal(calls.length, 0);
@@ -139,7 +145,7 @@ test('an unknown plan costs nothing and is not recorded', async () => {
 });
 
 test('the plan name is not case sensitive', async () => {
-  await service.run('voucher-buy', ALAN, { plan: ' Monthly ' });
+  await buy(ALAN, { plan: ' Monthly ' });
 
   assert.equal(calls.length, 3);
 });
@@ -147,7 +153,7 @@ test('the plan name is not case sensitive', async () => {
 test('a refused charge fails the purchase and leaves the reservation unactivated', async () => {
   replies.charge = async () => ({ error: 'Balance insufficient' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.equal(reply.text, "You don't have enough FMC for that plan.");
   assert.deepEqual(calls.map(([name]) => name), ['reserve', 'charge']);
@@ -158,7 +164,7 @@ test('a refused charge fails the purchase and leaves the reservation unactivated
 test('an account that is not linked is told how to link it', async () => {
   replies.charge = async () => ({ error: 'User not found' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /https:\/\/link\.test/);
 });
@@ -166,7 +172,7 @@ test('an account that is not linked is told how to link it', async () => {
 test('a charge that did not complete is a failed purchase', async () => {
   replies.charge = async () => ({ id: 'tx1', status: 'refunded' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /nothing was taken/);
   assert.equal(purchases()[0].status, 'failed');
@@ -176,7 +182,7 @@ test('a charge that did not complete is a failed purchase', async () => {
 test('a reservation the service refuses charges nothing', async () => {
   replies.reserve = async () => ({ error: 'Invalid request' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /nothing was taken/);
   assert.deepEqual(calls.map(([name]) => name), ['reserve']);
@@ -187,7 +193,7 @@ test('a reservation the service refuses charges nothing', async () => {
 test('a purchase that dies after the charge stays pending and is finished on resume', async () => {
   replies.activate = async () => { throw new Error('The vouchers service answered 503'); };
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /retried on its own/);
   assert.equal(purchases()[0].status, 'pending');
@@ -204,7 +210,7 @@ test('a purchase that dies after the charge stays pending and is finished on res
 test('an activation the service refuses keeps the purchase pending', async () => {
   replies.activate = async () => ({ error: 'Invalid request id' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /retried on its own/);
   assert.equal(purchases()[0].status, 'pending');
@@ -212,53 +218,65 @@ test('an activation the service refuses keeps the purchase pending', async () =>
 });
 
 test('resume leaves finished and failed purchases alone', async () => {
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
   replies.charge = async () => ({ error: 'Balance insufficient' });
-  await service.run('voucher-buy', ALAN, { plan: 'yearly' });
+  await buy(ALAN, { plan: 'yearly' });
   calls = [];
 
   assert.equal(await service.resume(), 0);
   assert.equal(calls.length, 0);
 });
 
-test('a second purchase waits while the first is still going through', async () => {
-  let release;
-  replies.charge = () => new Promise((resolve) => {
-    release = () => resolve({ id: 'tx1', status: 'completed' });
-  });
-
-  const first = service.run('voucher-buy', ALAN, { plan: 'monthly' });
+const until = async (ready, tries = 200) => {
+  if (ready()) return;
+  assert.ok(tries > 0, 'the charge was never reached');
   await new Promise(resolve => setImmediate(resolve));
-  const second = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
-  release();
+  await until(ready, tries - 1);
+};
+
+const stalledCharge = () => {
+  const stall = {};
+  replies.charge = () => new Promise((resolve) => {
+    stall.release = () => resolve({ id: 'tx1', status: 'completed' });
+  });
+  return stall;
+};
+
+test('pressing Confirm twice charges once, and the second press is told it was done', async () => {
+  const stall = stalledCharge();
+  const prompt = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const confirmId = prompt.components[0].id;
+
+  const first = service.component(ALAN, confirmId);
+  await until(() => stall.release);
+  const second = await service.component(ALAN, confirmId);
+  stall.release();
   await first;
 
-  assert.match(second.text, /still going through/);
-  assert.equal(purchases().length, 1);
+  assert.match(second.text, /already confirmed/);
+  assert.equal(calls.filter(([name]) => name === 'charge').length, 1);
 });
 
 test('resume skips a purchase that is being settled right now', async () => {
-  let release;
-  replies.charge = () => new Promise((resolve) => {
-    release = () => resolve({ id: 'tx1', status: 'completed' });
-  });
+  const stall = stalledCharge();
+  const prompt = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
 
-  const first = service.run('voucher-buy', ALAN, { plan: 'monthly' });
-  await new Promise(resolve => setImmediate(resolve));
+  const first = service.component(ALAN, prompt.components[0].id);
+  await until(() => stall.release);
   assert.equal(await service.resume(), 0);
-  release();
+  stall.release();
   await first;
 
   assert.equal(calls.filter(([name]) => name === 'charge').length, 1);
 });
 
 test('voucher-mine shows your codes privately, newest first, and not failed ones', async () => {
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
   replies.reserve = async () => ({ code: 'DDDD-EEEE-FFFF' });
-  await service.run('voucher-buy', ALAN, { plan: 'yearly' });
+  await buy(ALAN, { plan: 'yearly' });
   replies.charge = async () => ({ error: 'Balance insufficient' });
-  await service.run('voucher-buy', ALAN, { plan: 'yearly' });
-  await service.run('voucher-buy', { discordId: '222', name: 'Sam' }, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'yearly' });
+  await buy({ discordId: '222', name: 'Sam' }, { plan: 'monthly' });
   const bought = await store.purchasesByUser(ALAN.discordId);
   await store.setPurchase(bought.find(p => p.code === 'AAAA-BBBB-CCCC').id, { createdAt: 1700000000000 });
   await store.setPurchase(bought.find(p => p.code === 'DDDD-EEEE-FFFF').id, { createdAt: 1700100000000 });
@@ -274,7 +292,7 @@ test('voucher-mine shows your codes privately, newest first, and not failed ones
 });
 
 test('a purchase without a usable date is listed without one', async () => {
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
   const [purchase] = await store.purchasesByUser(ALAN.discordId);
   await store.setPurchase(purchase.id, { createdAt: null });
 
@@ -284,7 +302,7 @@ test('a purchase without a usable date is listed without one', async () => {
 });
 
 test('the purchase reply is an embed with the code on its own line, and keeps a plain text version', async () => {
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /AAAA-BBBB-CCCC/);
   assert.equal(reply.embed.title, 'Voucher purchased');
@@ -299,17 +317,17 @@ test('the purchase reply is an embed with the code on its own line, and keeps a 
 test('the purchase embed says where to redeem when that is configured', async () => {
   service = build({ redeemURL: 'https://redeem.test' });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.deepEqual(reply.embed.fields[2], { name: 'Redeem it at', value: 'https://redeem.test' });
 });
 
 test('a refused or retried purchase is a plain reply, with no embed', async () => {
   replies.charge = async () => ({ error: 'Balance insufficient' });
-  const refused = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const refused = await buy(ALAN, { plan: 'monthly' });
   replies.charge = async () => ({ id: 'tx1', status: 'completed' });
   replies.activate = async () => { throw new Error('down'); };
-  const retried = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const retried = await buy(ALAN, { plan: 'monthly' });
 
   assert.equal('embed' in refused, false);
   assert.equal('embed' in retried, false);
@@ -319,7 +337,7 @@ test('voucher-mine says when a purchase is still being processed or you have non
   assert.match((await service.run('voucher-mine', ALAN)).text, /haven't bought/);
 
   replies.activate = async () => { throw new Error('down'); };
-  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  await buy(ALAN, { plan: 'monthly' });
 
   assert.match((await service.run('voucher-mine', ALAN)).text, /Monthly: still being processed/);
 });
@@ -352,8 +370,8 @@ test('the plan list shows the labels and never the names behind them', async () 
 test('a plan can be bought by its label as well as by its name', async () => {
   service = build({ plans: () => MENU });
 
-  await service.run('voucher-buy', ALAN, { plan: 'replay-month' });
-  await service.run('voucher-buy', ALAN, { plan: '  replay pro, 1 MONTH ' });
+  await buy(ALAN, { plan: 'replay-month' });
+  await buy(ALAN, { plan: '  replay pro, 1 MONTH ' });
 
   assert.equal(calls.filter(([name]) => name === 'reserve').length, 2);
   assert.deepEqual(calls[0][1].data, { plan: 'month', months: 1 });
@@ -362,7 +380,7 @@ test('a plan can be bought by its label as well as by its name', async () => {
 test('a plan the menu does not have is refused without naming the plans behind it', async () => {
   service = build({ plans: () => MENU });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
+  const reply = await buy(ALAN, { plan: 'month' });
 
   assert.match(reply.text, /no plan called "month"/);
   assert.equal(calls.length, 0);
@@ -370,7 +388,7 @@ test('a plan the menu does not have is refused without naming the plans behind i
 
 test('the purchase keeps the label it was bought under, and voucher-mine shows it', async () => {
   service = build({ plans: () => MENU });
-  await service.run('voucher-buy', ALAN, { plan: 'replay-month' });
+  await buy(ALAN, { plan: 'replay-month' });
   service = build({ plans: () => ({}) });
 
   const reply = await service.run('voucher-mine', ALAN);
@@ -389,7 +407,7 @@ test('during a sale the sale price is charged and the plan list says when it end
   service = build({ plans: () => SALE, now: () => 9000 });
 
   const listed = await service.run('voucher-plans', ALAN);
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
+  const reply = await buy(ALAN, { plan: 'month' });
 
   assert.match(listed.text, /Month for 80 FMC \(sale ends <t:10:R>, normally 100\)/);
   assert.equal(calls[1][1].amount, 80);
@@ -401,7 +419,7 @@ test('once the sale has ended the regular price is charged, even before the plan
   service = build({ plans: () => SALE, now: () => 10000 });
 
   const listed = await service.run('voucher-plans', ALAN);
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
+  const reply = await buy(ALAN, { plan: 'month' });
 
   assert.match(listed.text, /Month for 100 FMC$/);
   assert.equal(calls[1][1].amount, 100);
@@ -412,7 +430,7 @@ test('a purchase that was started during a sale is resumed at the price it was s
   let clock = 9000;
   service = build({ plans: () => SALE, now: () => clock });
   replies.activate = async () => { throw new Error('down'); };
-  await service.run('voucher-buy', ALAN, { plan: 'month' });
+  await buy(ALAN, { plan: 'month' });
   replies.activate = async () => ({ code: 'AAAA-BBBB-CCCC' });
   clock = 20000;
   calls = [];
@@ -432,7 +450,7 @@ test('plans are refreshed before a purchase, so the price charged is the live on
     now: () => 9000,
   });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'month' });
+  const reply = await buy(ALAN, { plan: 'month' });
 
   assert.equal(calls[1][1].amount, 80);
   assert.match(reply.text, /You paid 80 FMC/);
@@ -447,7 +465,7 @@ test('a plan that only exists after the refresh can be bought', async () => {
     },
   });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /Here is your Monthly voucher/);
 });
@@ -464,17 +482,17 @@ test('the plan list is refreshed too', async () => {
   assert.match((await service.run('voucher-plans', ALAN)).text, /Monthly for 100 FMC/);
 });
 
-test('a refresh that fails does not stop a purchase, and is reported', async () => {
+test('a refresh that fails does not stop a purchase, and is reported at the offer and at Confirm', async () => {
   service = build({
     refresh: async () => {
       throw new Error('The plans address answered 500');
     },
   });
 
-  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const reply = await buy(ALAN, { plan: 'monthly' });
 
   assert.match(reply.text, /Here is your Monthly voucher/);
-  assert.equal(errors.length, 1);
+  assert.equal(errors.length, 2);
   assert.match(errors[0].message, /answered 500/);
 });
 
@@ -495,5 +513,5 @@ test('with no plans configured nothing can be bought', async () => {
   service = build({ plans: () => ({}) });
 
   assert.match((await service.run('voucher-plans', ALAN)).text, /No plans/);
-  assert.match((await service.run('voucher-buy', ALAN, { plan: 'monthly' })).text, /No plans/);
+  assert.match((await buy(ALAN, { plan: 'monthly' })).text, /No plans/);
 });

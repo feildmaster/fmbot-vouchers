@@ -27,6 +27,9 @@ module.exports = function createFakeFirestore() {
     set: async (value) => {
       data.set(path, clone(value));
     },
+    delete: async () => {
+      data.delete(path);
+    },
     update: async (fields) => {
       if (!data.has(path)) throw new Error(`No document: ${path}`);
       const next = { ...data.get(path) };

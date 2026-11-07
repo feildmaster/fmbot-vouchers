@@ -10,7 +10,7 @@ module.exports = function createStore({ db, FieldValue }) {
 
   return {
     async createPurchase({
-      discordId, name, plan, label, type, data, amount, memo, note,
+      discordId, name, plan, label, type, data, amount, memo, note, status = 'pending', expiresAt,
     }) {
       const ref = purchases.doc();
       const purchase = {
@@ -23,15 +23,33 @@ module.exports = function createStore({ db, FieldValue }) {
         amount,
         memo,
         note,
-        status: 'pending',
+        status,
+        ...(expiresAt === undefined ? {} : { expiresAt }),
         createdAt: FieldValue.serverTimestamp(),
       };
       await ref.set(purchase);
       return { ...purchase, id: ref.id };
     },
 
-    setPurchase: (id, fields) => purchases.doc(id).update(fields),
+    async getPurchase(id) {
+      const snapshot = await purchases.doc(id).get();
+      return snapshot.exists ? plain(snapshot) : null;
+    },
 
+    claimPurchase(id, from, to, extra = {}) {
+      const ref = purchases.doc(id);
+      return db.runTransaction(async (t) => {
+        const snapshot = await t.get(ref);
+        if (!snapshot.exists || snapshot.get('status') !== from) return null;
+        t.update(ref, { status: to, ...extra });
+        return { ...plain(snapshot), status: to, ...extra };
+      });
+    },
+
+    setPurchase: (id, fields) => purchases.doc(id).update(fields),
+    deletePurchase: id => purchases.doc(id).delete(),
+
+    awaitingPurchases: () => query('status', 'awaiting'),
     pendingPurchases: () => query('status', 'pending'),
     purchasesByUser: discordId => query('discordId', discordId),
   };

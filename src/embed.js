@@ -1,6 +1,9 @@
 const { fmt } = require('./format');
 
 const DONE_COLOR = 0x57f287;
+const OFFER_COLOR = 0xfee75c;
+
+const stamp = time => Math.floor(time / 1000);
 
 function purchase({
   label, code, amount, redeemURL,
@@ -20,4 +23,23 @@ function purchase({
   };
 }
 
-module.exports = { purchase };
+function confirmation({
+  label, price, regular, until, expiresAt,
+}) {
+  const sale = until === undefined
+    ? ''
+    : ` (usually ${fmt(regular)}, ends <t:${stamp(until)}:R>)`;
+
+  return {
+    title: 'Confirm your purchase',
+    color: OFFER_COLOR,
+    description: `**${label}**`,
+    fields: [
+      { name: 'Price', value: `${fmt(price)} FMC${sale}`, inline: true },
+      { name: 'Offer ends', value: `<t:${stamp(expiresAt)}:R>`, inline: true },
+    ],
+    footer: { text: 'Your wallet is only charged when you press Confirm' },
+  };
+}
+
+module.exports = { confirmation, purchase };
