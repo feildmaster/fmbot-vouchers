@@ -10,9 +10,9 @@
     eslint-config-airbnb-base "^12.1.0"
     eslint-plugin-import "^2.8.0"
 
-"@basedakp48/plugin-utils@github:BasedAKP48/Utils#semver:^2.6.0":
-  version "2.6.0"
-  resolved "https://codeload.github.com/BasedAKP48/Utils/tar.gz/ac0492906c7d98be4a21a5fbcb5abfc1524443a5"
+"@basedakp48/plugin-utils@github:BasedAKP48/Utils#semver:^2.7.0":
+  version "2.7.0"
+  resolved "https://codeload.github.com/BasedAKP48/Utils/tar.gz/340891883d6ff4f2b3050259abe4b70079722f6b"
   dependencies:
     firebase-admin "^13"
 
