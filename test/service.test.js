@@ -259,15 +259,60 @@ test('voucher-mine shows your codes privately, newest first, and not failed ones
   replies.charge = async () => ({ error: 'Balance insufficient' });
   await service.run('voucher-buy', ALAN, { plan: 'yearly' });
   await service.run('voucher-buy', { discordId: '222', name: 'Sam' }, { plan: 'monthly' });
+  const bought = await store.purchasesByUser(ALAN.discordId);
+  await store.setPurchase(bought.find(p => p.code === 'AAAA-BBBB-CCCC').id, { createdAt: 1700000000000 });
+  await store.setPurchase(bought.find(p => p.code === 'DDDD-EEEE-FFFF').id, { createdAt: 1700100000000 });
 
   const reply = await service.run('voucher-mine', ALAN);
 
   assert.equal(reply.hidden, true);
   assert.deepEqual(reply.text.split('\n').slice(1), [
-    'Yearly: `DDDD-EEEE-FFFF`',
-    'Monthly: `AAAA-BBBB-CCCC`',
+    'Yearly: `DDDD-EEEE-FFFF` · bought <t:1700100000:d>',
+    'Monthly: `AAAA-BBBB-CCCC` · bought <t:1700000000:d>',
   ]);
   assert.equal(reply.pages.length, 1);
+});
+
+test('a purchase without a usable date is listed without one', async () => {
+  await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  const [purchase] = await store.purchasesByUser(ALAN.discordId);
+  await store.setPurchase(purchase.id, { createdAt: null });
+
+  const reply = await service.run('voucher-mine', ALAN);
+
+  assert.equal(reply.text.split('\n')[1], 'Monthly: `AAAA-BBBB-CCCC`');
+});
+
+test('the purchase reply is an embed with the code on its own line, and keeps a plain text version', async () => {
+  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+
+  assert.match(reply.text, /AAAA-BBBB-CCCC/);
+  assert.equal(reply.embed.title, 'Voucher purchased');
+  assert.equal(reply.embed.description, '```\nAAAA-BBBB-CCCC\n```');
+  assert.deepEqual(reply.embed.fields, [
+    { name: 'Plan', value: 'Monthly', inline: true },
+    { name: 'Paid', value: '100 FMC', inline: true },
+  ]);
+  assert.match(reply.embed.footer.text, /voucher-mine/);
+});
+
+test('the purchase embed says where to redeem when that is configured', async () => {
+  service = build({ redeemURL: 'https://redeem.test' });
+
+  const reply = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+
+  assert.deepEqual(reply.embed.fields[2], { name: 'Redeem it at', value: 'https://redeem.test' });
+});
+
+test('a refused or retried purchase is a plain reply, with no embed', async () => {
+  replies.charge = async () => ({ error: 'Balance insufficient' });
+  const refused = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+  replies.charge = async () => ({ id: 'tx1', status: 'completed' });
+  replies.activate = async () => { throw new Error('down'); };
+  const retried = await service.run('voucher-buy', ALAN, { plan: 'monthly' });
+
+  assert.equal('embed' in refused, false);
+  assert.equal('embed' in retried, false);
 });
 
 test('voucher-mine says when a purchase is still being processed or you have none', async () => {

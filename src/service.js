@@ -1,3 +1,4 @@
+const { purchase: purchaseEmbed } = require('./embed');
 const { fmt } = require('./format');
 
 const PROVIDER = 'discord.com';
@@ -137,9 +138,11 @@ module.exports = function createService({
 
     const lines = found.map((purchase) => {
       const label = purchase.label || labelOf(purchase.plan);
+      const bought = timeOf(purchase);
+      const when = bought ? ` · bought <t:${Math.floor(bought / 1000)}:d>` : '';
       return purchase.status === 'ready'
-        ? `${label}: \`${purchase.code}\``
-        : `${label}: still being processed`;
+        ? `${label}: \`${purchase.code}\`${when}`
+        : `${label}: still being processed${when}`;
     });
     return hiddenReply(`Your vouchers:\n${lines.join('\n')}`, { pages: paginate(lines, 'Your vouchers') });
   }
@@ -179,7 +182,14 @@ module.exports = function createService({
       if (!outcome.ready) return hiddenReply(refusal(outcome.error));
 
       const redeem = redeemURL ? ` Redeem it at ${redeemURL}.` : '';
-      return hiddenReply(`Here is your ${entry.label} voucher: \`${outcome.code}\`. You paid ${fmt(purchase.amount)} FMC.${redeem} If you lose this message, voucher-mine shows it again.`);
+      return hiddenReply(
+        `Here is your ${entry.label} voucher: \`${outcome.code}\`. You paid ${fmt(purchase.amount)} FMC.${redeem} If you lose this message, voucher-mine shows it again.`,
+        {
+          embed: purchaseEmbed({
+            label: entry.label, code: outcome.code, amount: purchase.amount, redeemURL,
+          }),
+        },
+      );
     } finally {
       buying.delete(ctx.discordId);
     }

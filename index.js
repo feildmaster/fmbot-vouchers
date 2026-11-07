@@ -128,10 +128,15 @@ plugin.presenceSystem().on('connect', () => {
 setInterval(() => service.resume().catch(report), RESUME_EVERY).unref();
 plugin.defaultCommands(definitions);
 
-function answer(msg, { text, hidden, pages }) {
+function answer(msg, {
+  text, hidden, embed, pages,
+}) {
   const system = plugin.messageSystem();
-  if (hidden) return system.sendMessage(privateReply(plugin, msg, text, { pages }));
-  return system.sendText(text, msg, pages ? { discord_pages: pages } : undefined);
+  if (hidden) return system.sendMessage(privateReply(plugin, msg, text, { embed, pages }));
+  const data = {};
+  if (embed) data.discord_embed = embed;
+  if (pages) data.discord_pages = pages;
+  return system.sendText(text, msg, Object.keys(data).length ? data : undefined);
 }
 
 plugin.messageSystem().on('message/command', (msg) => {
